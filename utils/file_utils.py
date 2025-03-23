@@ -273,6 +273,7 @@ def ValidacaoCamposObrigatorios(df, regras, dic):
 def ValidacaoTipoDado(df, regras, dic):
     """
     Valida se os tipos de dados das colunas do DataFrame correspondem aos tipos esperados.
+    Tenta converter os campos para o tipo esperado e, se a conversão falhar, registra um erro.
     
     :param df: DataFrame do arquivo.
     :param regras: DataFrame com as regras (contém o campo 'DescricaoCampo' e 'TipoDeDado').
@@ -280,13 +281,33 @@ def ValidacaoTipoDado(df, regras, dic):
     :return: Dicionário atualizado com resultados da validação.
     """
     try:
-        # Dicionário para mapear tipos de dados esperados
+        # Dicionário para mapear tipos de dados esperados e funções de conversão
         tipo_dado_map = {
-            'int': 'int64',
-            'float': 'float64',
-            'str': 'object',
-            'date': 'datetime64[ns]',
-            'bool': 'bool'
+            'número': {
+                'tipos_aceitos': ['int64', 'float64'],
+                'conversao': lambda x: pd.to_numeric(x.astype(str).str.replace(',', '.'), errors='coerce'),  # Converte para numérico, substituindo vírgula por ponto
+                'mensagem_erro': 'int ou float'
+            },
+            'float': {
+                'tipos_aceitos': 'float64',
+                'conversao': lambda x: pd.to_numeric(x.astype(str).str.replace(',', '.'), errors='coerce'),  # Converte para numérico, substituindo vírgula por ponto
+                'mensagem_erro': 'float'
+            },
+            'texto': {
+                'tipos_aceitos': 'object',
+                'conversao': lambda x: x.astype(str),  # Converte para texto
+                'mensagem_erro': 'texto'
+            },
+            'data': {
+                'tipos_aceitos': 'datetime64[ns]',
+                'conversao': lambda x: pd.to_datetime(x, format='%d/%m/%Y', errors='coerce'),  # Converte para data, usando o formato dd/mm/yyyy
+                'mensagem_erro': 'data'
+            },
+            'bool': {
+                'tipos_aceitos': 'bool',
+                'conversao': lambda x: x.astype(bool),  # Converte para booleano
+                'mensagem_erro': 'booleano'
+            }
         }
 
         # Lista para armazenar erros de tipo de dado
@@ -298,19 +319,37 @@ def ValidacaoTipoDado(df, regras, dic):
 
             # Verifica se o campo existe no DataFrame
             if campo not in df.columns:
-                erros_tipo_dado.append(f"Campo '{campo}' não encontrado no arquivo.")
+                erros_tipo_dado.append(f'Campo "{campo}" não encontrado no arquivo.')
                 continue
 
-            # Obtém o tipo de dado atual da coluna
+            # Verifica se o tipo de dado esperado é suportado
+            if tipo_esperado not in tipo_dado_map:
+                erros_tipo_dado.append(f'Tipo de dado "{tipo_esperado}" não é suportado para o campo "{campo}".')
+                continue
+
+            # Tenta converter o campo para o tipo esperado
+            try:
+                df[campo] = tipo_dado_map[tipo_esperado]['conversao'](df[campo])
+            except Exception as e:
+                erros_tipo_dado.append(
+                    f'Campo "{campo}": Não foi possível converter para {tipo_dado_map[tipo_esperado]["mensagem_erro"]}. Erro: {e}'
+                )
+                continue
+
+            # Verifica se o tipo de dado atual corresponde ao tipo esperado após a conversão
+            tipo_esperado_pandas = tipo_dado_map[tipo_esperado]['tipos_aceitos']
             tipo_atual = str(df[campo].dtype)
 
-            # Verifica se o tipo de dado atual corresponde ao tipo esperado
-            if tipo_esperado in tipo_dado_map:
-                tipo_esperado_pandas = tipo_dado_map[tipo_esperado]
-                if tipo_atual != tipo_esperado_pandas:
-                    erros_tipo_dado.append(f"Campo '{campo}': Tipo de dado incorreto. Esperado: {tipo_esperado_pandas}, Encontrado: {tipo_atual}.")
+            if isinstance(tipo_esperado_pandas, list):  # Caso especial para 'número' (aceita int ou float)
+                if tipo_atual not in tipo_esperado_pandas:
+                    erros_tipo_dado.append(
+                        f'Campo "{campo}": Tipo de dado incorreto. Esperado: {tipo_dado_map[tipo_esperado]["mensagem_erro"]}, Encontrado: {tipo_atual}.'
+                    )
             else:
-                erros_tipo_dado.append(f"Tipo de dado '{tipo_esperado}' não é suportado para o campo '{campo}'.")
+                if tipo_atual != tipo_esperado_pandas:
+                    erros_tipo_dado.append(
+                        f'Campo "{campo}": Tipo de dado incorreto. Esperado: {tipo_dado_map[tipo_esperado]["mensagem_erro"]}, Encontrado: {tipo_atual}.'
+                    )
 
         # Se houver erros, adiciona ao dicionário
         if erros_tipo_dado:
@@ -341,7 +380,7 @@ def ValidacaoValoresIn(df, regra, dic):
 
         # Verifica se o campo existe no DataFrame
         if campo not in df.columns:
-            dic['Erro_ValoresIn'] = [f"Campo '{campo}' não encontrado no arquivo.", '']
+            dic['Erro_ValoresIn'] = [f'Campo "{campo}" não encontrado no arquivo.', '']
             return dic, False
 
         # Filtra valores que não estão na lista de permitidos (ignorando nulos e vazios)
@@ -361,14 +400,13 @@ def ValidacaoValoresIn(df, regra, dic):
         dic['Erro_ValoresIn'] = [f"Erro ao validar valores na coluna '{campo}': {e}", '']
         return dic, False
     
-def ValidacaoCNPJ(df, regra, dic, coluna_tipo_pessoa='_c29'):
+def ValidacaoCNPJ(df, regra, dic):
     """
     Valida se os valores de uma coluna são CNPJs ou CPFs válidos, com base no número de dígitos.
     
     :param df: DataFrame do arquivo.
     :param regra: Linha da tabela de regras (contém 'DescricaoCampo').
     :param dic: Dicionário para armazenar resultados.
-    :param coluna_tipo_pessoa: Nome da coluna que indica o tipo de pessoa (PJ ou PF).
     :return: Dicionário atualizado com resultados da validação.
     """
     try:
@@ -380,27 +418,27 @@ def ValidacaoCNPJ(df, regra, dic, coluna_tipo_pessoa='_c29'):
             return dic, False
 
         # Remove caracteres não numéricos (pontos, barras, hífens)
-        df['cnpj_limpo'] = df[campo].astype(str).str.replace(r'[./-]', '', regex=True)
+        df['cnpj_limpo'] = df[campo].astype(str).str.replace(r'[./-]', '', regex=True).str.zfill(14)
 
         # Verifica o tamanho do CNPJ/CPF e o tipo de pessoa
-        condicao_cnpj = (df['cnpj_limpo'].str.len() == 14) & (df[coluna_tipo_pessoa] == 'PJ')
-        condicao_cpf = (df['cnpj_limpo'].str.len() == 11) & (df[coluna_tipo_pessoa] == 'PF')
+        condicao_cnpj = df['cnpj_limpo'].str.len() == 14
+        condicao_cpf = df['cnpj_limpo'].str.len() == 11
 
         # Filtra valores inválidos
         valores_invalidos = df[~(condicao_cnpj | condicao_cpf) & df[campo].notna() & (df[campo] != '')]
 
         # Se houver valores inválidos, registra o erro
         if not valores_invalidos.empty:
-            problema = f"Valores inválidos na coluna '{campo}'. CNPJ deve ter 14 dígitos para PJ e CPF deve ter 11 dígitos para PF."
-            dic['Erro_CNPJ'] = [problema, valores_invalidos[[campo, coluna_tipo_pessoa]].to_string(index=False)]
+            problema = f'Valores inválidos na coluna "{campo}". CNPJ deve ter 14 dígitos para PJ e CPF deve ter 11 dígitos para PF.'
+            dic['Erro_CNPJ'] = [problema, valores_invalidos[[campo]].to_string(index=False)]
             return dic, False
 
         # Se todos os valores estiverem corretos
-        dic['Reporte'].append(f"Valores da coluna '{campo}' são CNPJs ou CPFs válidos.")
+        dic['Reporte'].append(f'Valores da coluna "{campo}" são CNPJs ou CPFs válidos.')
         return dic, True
 
     except Exception as e:
-        dic['Erro_CNPJ'] = [f"Erro ao validar CNPJ/CPF na coluna '{campo}': {e}", '']
+        dic['Erro_CNPJ'] = [f'Erro ao validar CNPJ/CPF na coluna "{campo}": {e}', '']
         return dic, False
 
 def IsChaveUnica(df, colunas_chave, dic):
