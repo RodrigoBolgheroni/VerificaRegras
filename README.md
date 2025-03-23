@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # VerificaRegras
 
 Um projeto desenvolvido para validar regras de negócio em arquivos armazenados no Azure Blob, garantindo a integridade e a precisão dos dados.
@@ -67,5 +68,4 @@ VerificaRegras/
 ├── requirements.txt   # Dependências do projeto
 └── README.md          # Documentação
 ```
-
 
