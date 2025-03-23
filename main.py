@@ -204,86 +204,50 @@ def Main(cliente, tipoarquivoMySQL, tipoarquivo,ambiente, server_mysql, user_mys
                 # Insere o log no banco
                 insereLog(IdProcessamento, idtblcliente_tipoarquivo, "Iniciando validações adicionais", detalhe, status)
 
+                mensagensfinal = []
+
                 # PARTE 3A - VALIDAÇÃO CAMPOS OBRIGATÓRIOS
                 dic, flag_campos_obrigatorios = ValidacaoCamposObrigatorios(df, regras, dic)
                 if not flag_campos_obrigatorios:
-                    erro_msg = dic.get('Erro_Campos_Obrigatorios', ['Erro na validação de campos obrigatórios', ''])[0]
-                    status = "ErroHomologacao"
-                    insereLog(IdProcessamento, idtblcliente_tipoarquivo, "Erro na validação de campos obrigatórios", erro_msg, status)
-                    atualizarStatusRegra(
-                        id_status_arquivo,
-                        regras['Id'], 
-                        mensagem_erro=erro_msg
-                    )
-                    raise ValueError(erro_msg)
+                    erro_msg = dic.get('Erro_Campos_Obrigatorios')[0]
+                    mensagensfinal.append(erro_msg)
+                    insereLog(IdProcessamento, idtblcliente_tipoarquivo, "Erro na validação", erro_msg, "ErroHomologacao")
 
                 # PARTE 3B - VALIDAÇÃO TIPO DE DADO
                 dic, flag_tipo_dado = ValidacaoTipoDado(df, regras, dic)
                 if not flag_tipo_dado:
-                    erro_msg = dic.get('Erro_Tipo_Dado', ['Erro na validação de tipos de dados', ''])[0]
-                    status = "ErroHomologacao"
-                    insereLog(IdProcessamento, idtblcliente_tipoarquivo, "Erro na validação de tipos de dados", erro_msg, status)
-                    atualizarStatusRegra(
-                        id_status_arquivo,
-                        regras['Id'], 
-                        mensagem_erro=erro_msg
-                    )
-                    raise ValueError(erro_msg)
+                    erro_msg = dic.get('Erro_Tipo_Dado')[0]
+                    mensagensfinal.append(erro_msg)
+                    insereLog(IdProcessamento, idtblcliente_tipoarquivo, "Erro na validação", erro_msg, "ErroHomologacao")
+                    print(erro_msg)
 
                 # PARTE 3C - VALIDAÇÃO VALORES IN
-                for _, regra in regras[regras['Regra'] == 'IsValoresIn'].iterrows():
+                erros_valores_in = []
+                for _, regra in regras[regras['RegraNome'] == 'IsValoresIn'].iterrows():
                     dic, flag_valores_in = ValidacaoValoresIn(df, regra, dic)
                     if not flag_valores_in:
-                        erro_msg = dic.get('Erro_ValoresIn', ['Erro na validação de valores permitidos', ''])[0]
-                        status = "ErroHomologacao"
-                        insereLog(IdProcessamento, idtblcliente_tipoarquivo, "Erro na validação de valores permitidos", erro_msg, status)
-                        atualizarStatusRegra(
-                            id_status_arquivo,
-                            regras['Id'], 
-                            mensagem_erro=erro_msg
-                        )
-                        raise ValueError(erro_msg)
+                        erro_msg = dic.get('Erro_ValoresIn')[0]
+                        erros_valores_in.append(erro_msg)
+
+                if erros_valores_in:
+                    mensagensfinal.extend(erros_valores_in)
+                    insereLog(IdProcessamento, idtblcliente_tipoarquivo, "Erro na validação", " | ".join(erros_valores_in), "ErroHomologacao")
 
                 # PARTE 3D - VALIDAÇÃO CNPJ
-                for _, regra in regras[regras['Regra'] == 'IsCNPJ'].iterrows():
+                erros_cnpj = []
+                for _, regra in regras[regras['RegraNome'] == 'IsCNPJ'].iterrows():
                     dic, flag_cnpj = ValidacaoCNPJ(df, regra, dic)
                     if not flag_cnpj:
-                        erro_msg = dic.get('Erro_CNPJ', ['Erro na validação de CNPJ/CPF', ''])[0]
-                        status = "ErroHomologacao"
-                        insereLog(IdProcessamento, idtblcliente_tipoarquivo, "Erro na validação de CNPJ/CPF", erro_msg, status)
-                        atualizarStatusRegra(
-                            id_status_arquivo,
-                            regras['Id'], 
-                            mensagem_erro=erro_msg
-                        )
-                        raise ValueError(erro_msg)
+                        erro_msg = dic.get('Erro_CNPJ')[0]
+                        erros_cnpj.append(erro_msg)
 
-                # Atualiza o status do arquivo para sucesso nas validações
-                atualizarStatusArquivo(
-                    id_arquivo=row_tabelacliente_tipoarquivo['IdCliente_TipoArquivo'],
-                    ambiente=ambiente,
-                    container=row_tabelaarquivo_import['ContainerName'],
-                    diretorio=row_tabelaarquivo_import['CaminhoOrigem'],
-                    nomearquivo=row_tabelaarquivo_import['TabelaOrigem'],
-                    tamanho=(df.memory_usage(deep=True).sum() / 1024),  # Tamanho do arquivo em KB
-                    quantidade_registros=len(df),  # Quantidade de registros no arquivo
-                    status="Sucesso",
-                    mensagem_erro=None,  # Sem mensagem de erro
-                    id_tabela_pbi=row_tabelaarquivo_import['Id']
-                )
+                if erros_cnpj:
+                    mensagensfinal.extend(erros_cnpj)
+                    insereLog(IdProcessamento, idtblcliente_tipoarquivo, "Erro na validação", " | ".join(erros_cnpj), "ErroHomologacao")
 
-                # Atualizar status no PBI (código comentado)
-                #flag_atualizastatus_pbi = atualizar_status_arquivo(
-                #    server_mysql, user_mysql, password_mysql, bancodedados_mysql,
-                #    id_arquivo, status, mensagem_erro=mensagem_erro
-                #)
-
-                #if not flag_atualizastatus_pbi:
-                #    mensagem = "Erro ao atualizar o status na tblpbiimport para Sucesso"
-                #    status = "Erro"
-                #    insereLog(IdProcessamento, idtblcliente_tipoarquivo, "Erro ao atualizar status no PBI", mensagem, status)
-                #    raise
-
+                # Se houver mensagens de erro, lança uma exceção com todas as mensagens
+                if mensagensfinal:
+                    raise Exception(" | ".join(mensagensfinal))
             except Exception as e:
                 logger.error(f"Erro ao aplicar validações seguintes ao arquivo {id_arquivo}: {e}")
                 logger.error(traceback.format_exc())
@@ -295,15 +259,11 @@ def Main(cliente, tipoarquivoMySQL, tipoarquivo,ambiente, server_mysql, user_mys
                     nomearquivo=row_tabelaarquivo_import['TabelaOrigem'],
                     tamanho=(df.memory_usage(deep=True).sum() / 1024),  # Tamanho do arquivo em KB
                     quantidade_registros=len(df),  # Quantidade de registros no arquivo
-                    status="Erro",
+                    status="ErroHomologacao",
                     mensagem_erro=str(e),  # Mensagem de erro
                     id_tabela_pbi=row_tabelaarquivo_import['Id']
                 )
-                #atualizar_status_arquivo(
-                #    server_mysql, user_mysql, password_mysql, bancodedados_mysql,
-                #    id_arquivo, status, mensagem_erro=str(e)
-                #)
-                continue
+                break
 
             # PARTE 4 - CARGA NO SQL SERVER
             try:
