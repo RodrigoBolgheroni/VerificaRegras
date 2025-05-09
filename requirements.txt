@@ -1,0 +1,6 @@
+pandas
+pyodbc
+mysql-connector-python
+azure-storage-blob
+sqlalchemy
+cchardet 
